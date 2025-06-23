@@ -1,15 +1,13 @@
-# training.py
-
 import time
 import torch
 from torch import nn
 from torch.utils.data import DataLoader
 from datetime import datetime
 from sklearn.metrics import f1_score, precision_score, recall_score
-from balanced_loss import Loss  # Ensure this exists
+from balanced_loss import Loss
+from tqdm import tqdm
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-
 
 def token_accuracy(preds: torch.Tensor, targets: torch.Tensor, inverse_mask: torch.Tensor):
     preds_masked = preds.argmax(-1).masked_select(~inverse_mask)
@@ -17,6 +15,21 @@ def token_accuracy(preds: torch.Tensor, targets: torch.Tensor, inverse_mask: tor
     correct = (preds_masked == targets_masked).sum()
     return float(correct / preds_masked.size(0))
 
+def save_checkpoint(model, optimizer, epoch, filename):
+    checkpoint = {
+        'epoch': epoch,
+        'model_state_dict': model.state_dict(),
+        'optimizer_state_dict': optimizer.state_dict()
+    }
+    torch.save(checkpoint, filename)
+    
+def load_checkpoint(model, optimizer, path):
+    checkpoint = torch.load(path, map_location=device)
+    model.load_state_dict(checkpoint['model_state_dict'])
+    optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
+    epoch = checkpoint['epoch']
+    print(f"Checkpoint loaded from {path}, starting from epoch {epoch}")
+    return epoch
 
 class BertTrainer:
     def __init__(self, model, dataset, log_dir, checkpoint_path=None, batch_size=24, lr=0.005, epochs=5,
@@ -38,14 +51,14 @@ class BertTrainer:
     def __call__(self, X_vocab, adj):
         for epoch in range(self.epochs):
             self.train_one_epoch(epoch, X_vocab, adj)
-            self.save_checkpoint(epoch)
+            save_checkpoint(self.model, self.optimizer, epoch, f"{self.checkpoint_path}/bert_mlm_epoch_{epoch}_{int(datetime.now().timestamp())}.pt")
 
     def train_one_epoch(self, epoch, X_vocab, adj):
         self.model.train()
         start_time = time.time()
         running_loss = 0
 
-        for batch_idx, (inp, mask, inv_mask, target) in enumerate(self.loader, start=1):
+        for batch_idx, (inp, mask, inv_mask, target) in tqdm(enumerate(self.loader, start=1), total=self._batched_len, desc=f"Epoch {epoch+1}/{self.epochs}", leave=False):
             self.optimizer.zero_grad()
 
             output = self.model(inp, mask, X_vocab, adj)
@@ -67,34 +80,16 @@ class BertTrainer:
                 if batch_idx % self._accuracy_every == 0:
                     acc = token_accuracy(output, target, inv_mask)
                     print(f"Token Accuracy: {acc:.4f}")
-
-    def save_checkpoint(self, epoch):
-        if not self.checkpoint_path:
-            return
-        checkpoint = {
-            'epoch': epoch,
-            'model_state_dict': self.model.state_dict(),
-            'optimizer_state_dict': self.optimizer.state_dict()
-        }
-        filename = f"{self.checkpoint_path}/bert_checkpoint_epoch{epoch}_{int(datetime.utcnow().timestamp())}.pt"
-        torch.save(checkpoint, filename)
-        print(f"Checkpoint saved to {filename}")
-
-    def load_checkpoint(self, path):
-        checkpoint = torch.load(path)
-        self.model.load_state_dict(checkpoint['model_state_dict'])
-        self.optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
-        print(f"Checkpoint loaded from {path}")
-
-
 class BertTrainerClassification:
-    def __init__(self, model, train_ds, test_ds, batch_size=24, lr=0.005, epochs=5, print_every=10):
+    def __init__(self, model, train_ds, test_ds, batch_size=24, lr=0.005, epochs=5, print_every=10,
+                 checkpoint_path=None):
         self.model = model
         self.train_ds = train_ds
         self.test_ds = test_ds
         self.train_loader = DataLoader(train_ds, batch_size=batch_size, shuffle=True)
         self.test_loader = DataLoader(test_ds, batch_size=1, shuffle=False)
         self.epochs = epochs
+        self.checkpoint_path = checkpoint_path
 
         self.loss_fn = Loss(
             loss_type="cross_entropy",
@@ -110,6 +105,7 @@ class BertTrainerClassification:
     def __call__(self, X_vocab, adj):
         for epoch in range(self.epochs):
             self.train_one_epoch(epoch, X_vocab, adj)
+            save_checkpoint(self.model, self.optimizer, epoch, f"{self.checkpoint_path}/bert_classify_epoch_{epoch}_{int(datetime.now().timestamp())}.pt")
             self.evaluate(X_vocab, adj)
             self.scheduler.step()
 
@@ -151,7 +147,7 @@ class BertTrainerClassification:
 
         total = len(self.test_loader)
         print(f"Top@1: {top1/total:.4f} | Top@3: {top3/total:.4f} | Top@5: {top5/total:.4f}")
-        print("F1 (macro):", f1_score(y_true, y_pred, average='macro'))
-        print("Precision (macro):", precision_score(y_true, y_pred, average='macro'))
-        print("Recall (macro):", recall_score(y_true, y_pred, average='macro'))
+        print("F1 (macro):", f1_score(y_true, y_pred, average='macro', zero_division=0))
+        print("Precision (macro):", precision_score(y_true, y_pred, average='macro', zero_division=0))
+        print("Recall (macro):", recall_score(y_true, y_pred, average='macro', zero_division=0))
         self.model.train()

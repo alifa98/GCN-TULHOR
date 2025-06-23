@@ -1,8 +1,7 @@
-# main.py
-
 import gc
 import torch
 import pandas as pd
+import networkx as nx
 from sklearn.model_selection import train_test_split
 from model_components import BertSimpleModel
 from data_utils import BertSimplePreprocessor, BertSimpleTULPreprocessor
@@ -12,11 +11,11 @@ from graph_utils import build_spatial_graph, normalize_adjacency, scipy_to_torch
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 # Config
-DATA_PATH = "ho_geolife_res6.csv"
-BATCH_SIZE = 1024
+DATA_PATH = "/local/data1/shared_data/higher_order_trajectory/geolife/ho_geolife_res8.csv"
+BATCH_SIZE = 128
 EMB_SIZE = 256
 HIDDEN_SIZE = 256
-EPOCHS_MLM = 5
+EPOCHS_MLM = 4
 EPOCHS_CLASSIFY = 150
 NUM_HEADS = 4
 
@@ -31,7 +30,8 @@ def main():
     full_df["higher_order_trajectory_len"] = full_df["higher_order_trajectory"].str.split().apply(len)
 
     # Keep users with more than 2 records
-    valid_users = full_df["user_id"].value_counts()[lambda x: x > 2].index
+    valid_users = full_df["user_id"].value_counts() > 2
+    valid_users = valid_users[valid_users].index.tolist()
     full_df = full_df[full_df["user_id"].isin(valid_users)].reset_index(drop=True)
 
     # Trim trajectories to 90th percentile
@@ -68,7 +68,7 @@ def main():
 
     graph = build_spatial_graph(
         vocab_size=len(ds_mlm.vocab_hex),
-        h3_edges=ds_mlm.pairEdgesMapped,
+        h3_edges=ds_mlm.pair_edges_mapped,
         trajectory_sequences=trajectory_seqs
     )
     adj_matrix = normalize_adjacency(nx.adjacency_matrix(graph))
@@ -94,7 +94,7 @@ def main():
         model=model,
         dataset=ds_mlm,
         log_dir=None,
-        checkpoint_path=None,
+        checkpoint_path='checkpoints/',
         batch_size=BATCH_SIZE,
         lr=1e-5,
         epochs=EPOCHS_MLM,
@@ -116,7 +116,8 @@ def main():
         batch_size=BATCH_SIZE,
         lr=2e-5,
         epochs=EPOCHS_CLASSIFY,
-        print_every=BATCH_SIZE // 2
+        print_every=BATCH_SIZE // 2,
+        checkpoint_path='checkpoints/'
     )
     classify_trainer(X_vocab, adj_torch)
 

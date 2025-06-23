@@ -1,5 +1,3 @@
-# graph_utils.py
-
 import networkx as nx
 import scipy.sparse as sp
 import numpy as np
