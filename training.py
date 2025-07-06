@@ -6,6 +6,7 @@ from datetime import datetime
 from sklearn.metrics import f1_score, precision_score, recall_score
 from balanced_loss import Loss
 from tqdm import tqdm
+import logging
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
@@ -28,7 +29,7 @@ def load_checkpoint(model, optimizer, path):
     model.load_state_dict(checkpoint['model_state_dict'])
     optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
     epoch = checkpoint['epoch']
-    print(f"Checkpoint loaded from {path}, starting from epoch {epoch}")
+    logging.info(f"Checkpoint loaded from {path}, starting from epoch {epoch}")
     return epoch
 
 class BertTrainer:
@@ -51,7 +52,8 @@ class BertTrainer:
     def __call__(self, X_vocab, adj):
         for epoch in range(self.epochs):
             self.train_one_epoch(epoch, X_vocab, adj)
-            save_checkpoint(self.model, self.optimizer, epoch, f"{self.checkpoint_path}/bert_mlm_epoch_{epoch}_{int(datetime.now().timestamp())}.pt")
+            if self.checkpoint_path:
+                save_checkpoint(self.model, self.optimizer, epoch, f"{self.checkpoint_path}/bert_mlm_epoch_{epoch}_{int(datetime.now().timestamp())}.pt")
 
     def train_one_epoch(self, epoch, X_vocab, adj):
         self.model.train()
@@ -73,13 +75,13 @@ class BertTrainer:
             if batch_idx % self._print_every == 0:
                 elapsed = time.time() - start_time
                 avg_loss = running_loss / self._print_every
-                print(f"[Epoch {epoch+1}/{self.epochs}] [{batch_idx}/{self._batched_len}] "
+                logging.info(f"[Epoch {epoch+1}/{self.epochs}] [{batch_idx}/{self._batched_len}] "
                       f"MLM Loss: {avg_loss:.4f} | Time: {time.strftime('%H:%M:%S', time.gmtime(elapsed))}")
                 running_loss = 0
 
                 if batch_idx % self._accuracy_every == 0:
                     acc = token_accuracy(output, target, inv_mask)
-                    print(f"Token Accuracy: {acc:.4f}")
+                    logging.info(f"Token Accuracy: {acc:.4f}")
 class BertTrainerClassification:
     def __init__(self, model, train_ds, test_ds, batch_size=24, lr=0.005, epochs=5, print_every=10,
                  checkpoint_path=None):
@@ -105,15 +107,16 @@ class BertTrainerClassification:
     def __call__(self, X_vocab, adj):
         for epoch in range(self.epochs):
             self.train_one_epoch(epoch, X_vocab, adj)
-            save_checkpoint(self.model, self.optimizer, epoch, f"{self.checkpoint_path}/bert_classify_epoch_{epoch}_{int(datetime.now().timestamp())}.pt")
-            self.evaluate(X_vocab, adj)
+            if self.checkpoint_path:
+                save_checkpoint(self.model, self.optimizer, epoch, f"{self.checkpoint_path}/bert_classify_epoch_{epoch}_{int(datetime.now().timestamp())}.pt")
             self.scheduler.step()
+            # self.evaluate(X_vocab, adj)
 
     def train_one_epoch(self, epoch, X_vocab, adj):
         self.model.train()
         running_loss = 0
 
-        for batch_idx, (inp, mask, labels) in enumerate(self.train_loader, start=1):
+        for batch_idx, (inp, mask, labels) in tqdm(enumerate(self.train_loader, start=1), desc=f"Epoch {epoch+1}/{self.epochs}", leave=False):
             self.optimizer.zero_grad()
             logits = self.model(inp, mask, X_vocab, adj)
             loss = self.loss_fn(logits, labels.flatten())
@@ -124,7 +127,7 @@ class BertTrainerClassification:
 
             if batch_idx % self._print_every == 0:
                 avg_loss = running_loss / self._print_every
-                print(f"[Epoch {epoch+1}/{self.epochs}] [Batch {batch_idx}] Classification Loss: {avg_loss:.4f}")
+                logging.info(f"[Epoch {epoch+1}/{self.epochs}] [Batch {batch_idx}] Classification Loss: {avg_loss:.4f}")
                 running_loss = 0
 
     def evaluate(self, X_vocab, adj):
@@ -146,8 +149,14 @@ class BertTrainerClassification:
                 top5 += int(label in top_preds[:5])
 
         total = len(self.test_loader)
-        print(f"Top@1: {top1/total:.4f} | Top@3: {top3/total:.4f} | Top@5: {top5/total:.4f}")
-        print("F1 (macro):", f1_score(y_true, y_pred, average='macro', zero_division=0))
-        print("Precision (macro):", precision_score(y_true, y_pred, average='macro', zero_division=0))
-        print("Recall (macro):", recall_score(y_true, y_pred, average='macro', zero_division=0))
+        result = {
+            "acc@1": top1/total,
+            "acc@3": top3/total,
+            "acc@5": top5/total,
+            # (macro) evaluations
+            "f1": f1_score(y_true, y_pred, average='macro', zero_division=0),
+            "precision": precision_score(y_true, y_pred, average='macro', zero_division=0),
+            "recall": recall_score(y_true, y_pred, average='macro', zero_division=0)
+        }
         self.model.train()
+        return result
