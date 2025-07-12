@@ -7,8 +7,11 @@ from sklearn.metrics import f1_score, precision_score, recall_score
 from balanced_loss import Loss
 from copy import deepcopy
 from tqdm import tqdm
+import logging
 
+logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(message)s")
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
 
 def token_accuracy(preds: torch.Tensor, targets: torch.Tensor, inverse_mask: torch.Tensor):
     preds_masked = preds.argmax(-1).masked_select(~inverse_mask)
@@ -29,7 +32,7 @@ def load_checkpoint(model, optimizer, path):
     model.load_state_dict(checkpoint['model_state_dict'])
     optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
     epoch = checkpoint['epoch']
-    print(f"Checkpoint loaded from {path}, starting from epoch {epoch}")
+    logging.info(f"Checkpoint loaded from {path}, starting from epoch {epoch}")
     return epoch
 
 class BertTrainer:
@@ -69,7 +72,7 @@ class BertTrainer:
                 else:
                     patience_counter += 1
                     if patience_counter >= self.early_stopping_patience:
-                        print(f"Early stopping triggered at epoch {epoch+1}")
+                        logging.info(f"Early stopping triggered at epoch {epoch+1}")
                         break
         if best_state is not None:
             self.model.load_state_dict(best_state)
@@ -96,14 +99,16 @@ class BertTrainer:
             if batch_idx % self._print_every == 0:
                 elapsed = time.time() - start_time
                 avg_loss = running_loss / self._print_every
-                print(f"[Epoch {epoch+1}/{self.epochs}] [{batch_idx}/{self._batched_len}] "
-                      f"MLM Loss: {avg_loss:.4f} | Time: {time.strftime('%H:%M:%S', time.gmtime(elapsed))}")
+                # logging.info(f"[Epoch {epoch+1}/{self.epochs}] [{batch_idx}/{self._batched_len}] "
+                #       f"MLM Loss: {avg_loss:.4f} | Time: {time.strftime('%H:%M:%S', time.gmtime(elapsed))}")
                 running_loss = 0
 
                 if batch_idx % self._accuracy_every == 0:
                     acc = token_accuracy(output, target, inv_mask)
-                    print(f"Token Accuracy: {acc:.4f}")
+                    logging.info(f"Token Accuracy: {acc:.4f}")
         return total_loss / self._batched_len
+
+
 class BertTrainerClassification:
     def __init__(self, model, train_ds, test_ds, batch_size=24, lr=0.005, epochs=5, print_every=10,
                  checkpoint_path=None, early_stopping_patience=None, min_delta=0.0):
@@ -148,7 +153,7 @@ class BertTrainerClassification:
                 else:
                     patience_counter += 1
                     if patience_counter >= self.early_stopping_patience:
-                        print(f"Early stopping triggered at epoch {epoch+1}")
+                        logging.info(f"Early stopping triggered at epoch {epoch+1}")
                         break
         if best_state is not None:
             self.model.load_state_dict(best_state)
@@ -170,7 +175,7 @@ class BertTrainerClassification:
 
             if batch_idx % self._print_every == 0:
                 avg_loss = running_loss / self._print_every
-                print(f"[Epoch {epoch+1}/{self.epochs}] [Batch {batch_idx}] Classification Loss: {avg_loss:.4f}")
+                logging.info(f"[Epoch {epoch+1}/{self.epochs}] [Batch {batch_idx}] Classification Loss: {avg_loss:.4f}")
                 running_loss = 0
         return total_loss / len(self.train_loader)
 
