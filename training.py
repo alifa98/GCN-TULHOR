@@ -166,7 +166,7 @@ class BertTrainerClassification:
         self.model.train()
         running_loss = 0
         total_loss = 0
-        pbar = tqdm(enumerate(self.train_loader, start=1), desc="Classifier Training", leave=False)
+        pbar = tqdm(enumerate(self.train_loader, start=1), desc=f"Epoch {epoch+1}/{self.epochs}", leave=False)
         for batch_idx, (inp, mask, labels) in pbar:
             self.optimizer.zero_grad()
             logits = self.model(inp, mask, X_vocab, adj)
