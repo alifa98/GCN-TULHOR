@@ -76,14 +76,15 @@ class BertTrainer:
                         break
         if best_state is not None:
             self.model.load_state_dict(best_state)
+            logging.info("Best MLM is loaded.")
 
     def train_one_epoch(self, epoch, X_vocab, adj):
         self.model.train()
         start_time = time.time()
         running_loss = 0
         total_loss = 0
-
-        for batch_idx, (inp, mask, inv_mask, target) in tqdm(enumerate(self.loader, start=1), total=self._batched_len, desc=f"Epoch {epoch+1}/{self.epochs}", leave=False):
+        pbar = tqdm(enumerate(self.loader, start=1), total=self._batched_len, desc=f"Epoch {epoch+1}/{self.epochs}", leave=False)
+        for batch_idx, (inp, mask, inv_mask, target) in pbar:
             self.optimizer.zero_grad()
 
             output = self.model(inp, mask, X_vocab, adj)
@@ -96,16 +97,18 @@ class BertTrainer:
             running_loss += mlm_loss.item()
             total_loss += mlm_loss.item()
 
+            postfix_stats = {}
             if batch_idx % self._print_every == 0:
                 elapsed = time.time() - start_time
                 avg_loss = running_loss / self._print_every
-                # logging.info(f"[Epoch {epoch+1}/{self.epochs}] [{batch_idx}/{self._batched_len}] "
-                #       f"MLM Loss: {avg_loss:.4f} | Time: {time.strftime('%H:%M:%S', time.gmtime(elapsed))}")
+                postfix_stats["MLM Loss"] = avg_loss
                 running_loss = 0
 
                 if batch_idx % self._accuracy_every == 0:
                     acc = token_accuracy(output, target, inv_mask)
-                    logging.info(f"Token Accuracy: {acc:.4f}")
+                    postfix_stats["Token Accuracy"] = acc
+                
+            # pbar.set_postfix(postfix_stats, refresh=False)
         return total_loss / self._batched_len
 
 
@@ -157,13 +160,14 @@ class BertTrainerClassification:
                         break
         if best_state is not None:
             self.model.load_state_dict(best_state)
+            logging.info("Best Classifier is loaded.")
 
     def train_one_epoch(self, epoch, X_vocab, adj):
         self.model.train()
         running_loss = 0
         total_loss = 0
-
-        for batch_idx, (inp, mask, labels) in enumerate(self.train_loader, start=1):
+        pbar = tqdm(enumerate(self.train_loader, start=1), desc="Classifier Training", leave=False)
+        for batch_idx, (inp, mask, labels) in pbar:
             self.optimizer.zero_grad()
             logits = self.model(inp, mask, X_vocab, adj)
             loss = self.loss_fn(logits, labels.flatten())
@@ -175,7 +179,7 @@ class BertTrainerClassification:
 
             if batch_idx % self._print_every == 0:
                 avg_loss = running_loss / self._print_every
-                logging.info(f"[Epoch {epoch+1}/{self.epochs}] [Batch {batch_idx}] Classification Loss: {avg_loss:.4f}")
+                pbar.set_postfix({"Classification Loss": avg_loss})
                 running_loss = 0
         return total_loss / len(self.train_loader)
 
